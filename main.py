@@ -11,6 +11,7 @@ from database import FaceDatabase
 from models import SCRFD, ArcFace
 from utils.logging import setup_logging
 from utils.helpers import compute_similarity, draw_bbox_info, draw_bbox
+import glob
 
 
 warnings.filterwarnings("ignore")
@@ -134,50 +135,83 @@ def main(params):
         logging.error(f"Failed to load model weights: {e}")
         return
 
-    # Use context manager for proper resource cleanup
     with build_face_database(detector, recognizer, params, force_update=params.update_db) as face_db:
         colors = {}
 
-        try:
-            cap = cv2.VideoCapture(params.source if not isinstance(params.source, int) else int(params.source))
-            if not cap.isOpened():
-                raise IOError(f"Could not open video source: {params.source}")
+        # Determine sources
+        sources = []
+        if isinstance(params.source, int):
+            sources = [params.source]
+        elif isinstance(params.source, str):
+            if os.path.isdir(params.source):
+                sources = glob.glob(os.path.join(params.source, "*.mp4"))
+                if not sources:
+                    logging.error(f"No .mp4 files found in folder: {params.source}")
+                    return
+            else:
+                sources = [params.source]
+        else:
+            logging.error(f"Invalid source type: {type(params.source)}")
+            return
 
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            out = cv2.VideoWriter(params.output, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+        # Loop through each source
+        for src in sources:
+            try:
+                cap = cv2.VideoCapture(src if not isinstance(src, int) else int(src))
+                if not cap.isOpened():
+                    logging.error(f"Could not open video source: {src}")
+                    continue
 
-            frame_count = 0
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
 
-                start = time.time()
-                frame = frame_processor(frame, detector, recognizer, face_db, colors, params)
-                end = time.time()
+                # Determine output path
+                if getattr(params, "output", None):
+                    if os.path.isdir(params.output):
+                        base_name = os.path.splitext(os.path.basename(src))[0]
+                        output_path = os.path.join(params.output, f"{base_name}_processed.mp4")
+                    else:
+                        output_path = params.output
+                else:
+                    # Auto-generate output file with _predict suffix
+                    if isinstance(src, int):
+                        # Webcam input
+                        output_path = "webcam_predict.mp4"
+                    else:
+                        base_name = os.path.splitext(os.path.basename(src))[0]
+                        dir_name = os.path.dirname(src)
+                        output_path = os.path.join(dir_name, f"{base_name}_predict.mp4")
 
-                out.write(frame)
+                out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
 
-                # cv2.imshow("Face Recognition", frame)
-                # if cv2.waitKey(1) & 0xFF == ord("q"):
-                #     break
+                frame_count = 0
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
 
-                frame_count += 1
-                logging.debug(f"Frame {frame_count}, FPS: {1 / (end - start):.2f}")
+                    start = time.time()
+                    frame = frame_processor(frame, detector, recognizer, face_db, colors, params)
+                    end = time.time()
 
-            logging.info(f"Processed {frame_count} frames.")
+                    out.write(frame)
 
-        except Exception as e:
-            logging.error(f"Error during video processing: {e}")
-        finally:
-            # Proper resource cleanup in finally block
-            if 'cap' in locals():
-                cap.release()
-            if 'out' in locals():
-                out.release()
-            # cv2.destroyAllWindows()
+                    frame_count += 1
+                    logging.debug(f"{src} - Frame {frame_count}, FPS: {1 / (end - start):.2f}")
+
+                logging.info(f"Processed {frame_count} frames for source: {src}. Output saved to {output_path}")
+
+            except Exception as e:
+                logging.error(f"Error processing video {src}: {e}")
+            finally:
+                if 'cap' in locals():
+                    cap.release()
+                if 'out' in locals():
+                    out.release()
+
+        # cv2.destroyAllWindows()  # Uncomment if using imshow
+
 
 
 if __name__ == "__main__":
