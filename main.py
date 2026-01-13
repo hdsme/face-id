@@ -160,9 +160,9 @@ def main(params):
 
                 out.write(frame)
 
-                cv2.imshow("Face Recognition", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                # cv2.imshow("Face Recognition", frame)
+                # if cv2.waitKey(1) & 0xFF == ord("q"):
+                #     break
 
                 frame_count += 1
                 logging.debug(f"Frame {frame_count}, FPS: {1 / (end - start):.2f}")
@@ -177,7 +177,7 @@ def main(params):
                 cap.release()
             if 'out' in locals():
                 out.release()
-            cv2.destroyAllWindows()
+            # cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
